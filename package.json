@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "devDependencies": {
+    "@lydell/elm": "0.19.1-14",
     "elm-test": "0.19.1-revision12",
     "vite": "^5.2.0",
     "vite-plugin-elm": "^3.0.0"
