@@ -1,11 +1,20 @@
-module Board exposing (Board, Player(..), Tile(..), at, empty, nextPlayer, place, toList, tryPlace, winner)
+module Board exposing (Board, Player(..), Tile(..)
+                      , at, empty, nextPlayer, place
+                      , toList, tryPlace
+                      , BoardState(..), WinningDirection(..), winner)
 
 import Array exposing (Array)
-
+import Utils.List as LUtils
+import Utils.Array as AUtils
 
 type Player
     = X
     | O
+
+
+players : List Player
+players =
+    [ X, O ]
 
 
 nextPlayer : Player -> Player
@@ -72,58 +81,21 @@ place ( rowI, colI ) player (Board board) =
         |> Board
 
 
-tryPlace : ( Int, Int ) -> Player -> Board -> (Maybe Board, Maybe Player)
-tryPlace ( rowI, colI ) player board =
-    if at ( rowI, colI ) board /= Empty then
-        ( Nothing, Nothing )
-    else
-        let
-            b =
-                case board of
-                    Board bo ->
-                        bo
+type BoardState
+    = NextPlayer Player
+    | Draw
+    | Winner Player WinningDirection
 
-            newRow =
-                b
-                    |> Array.get rowI
-                    |> Maybe.map
-                        (Array.indexedMap
-                            (\i tile ->
-                                if i == colI then
-                                    Occupied player
 
-                                else
-                                    tile
-                            )
-                        )
-            newBoard = Maybe.map (\row -> Array.set rowI row b |> Board) newRow
-        in
-        ( newBoard, Maybe.andThen winner newBoard )
+type WinningDirection
+    = Row Int
+    | Column Int
+    | Diagonal Int
 
 
 rows : Board -> Array (Array Tile)
 rows (Board board) =
     board
-
-
-amap3 : (a -> a -> a -> b) -> Array a -> Array a -> Array a -> Array b
-amap3 fn a1 a2 a3 =
-    let
-        acc fn_ a1_ a2_ a3_ i acc_ =
-            case
-                Maybe.map3 fn_
-                    (Array.get i a1)
-                    (Array.get i a2)
-                    (Array.get i a3)
-            of
-                Nothing ->
-                    acc_
-
-                Just val ->
-                    acc fn_ a1_ a2_ a3_ (i + 1) (Array.push val acc_)
-    in
-    acc fn a1 a2 a3 0 Array.empty
-
 
 cols : Board -> Array (Array Tile)
 cols (Board board) =
@@ -140,7 +112,7 @@ cols (Board board) =
         row3 =
             Array.get 2 board |> Maybe.withDefault invalidRow
     in
-    amap3
+    AUtils.map3
         (\el1 el2 el3 -> Array.empty |> Array.push el1 |> Array.push el2 |> Array.push el3)
         row1
         row2
@@ -182,51 +154,92 @@ diags board =
         |> Array.push d2
 
 
-aany : (a -> Bool) -> Array a -> Bool
-aany fn array =
+checkWinningArray : Array Tile -> Maybe Player
+checkWinningArray tiles =
+    players
+        |> LUtils.firstWhere
+            (\player -> AUtils.all ((==) (Occupied player)) tiles)
+
+checkWinningGroup : Array (Array Tile) -> Maybe ( Player, Int )
+checkWinningGroup tileGroup =
+    tileGroup
+        |> Array.indexedMap
+            (\i tiles ->
+                checkWinningArray tiles
+                    |> Maybe.map (\p -> ( p, i ))
+            )
+        |> Array.toList
+        |> LUtils.firstWhere ((/=) Nothing)
+        |> Maybe.andThen identity
+
+
+checkRowWinner : Board -> Maybe ( Player, WinningDirection )
+checkRowWinner = rows >> checkWinningGroup >> Maybe.map (Tuple.mapSecond Row)
+
+checkColWinner : Board -> Maybe ( Player, WinningDirection )
+checkColWinner = cols >> checkWinningGroup >> Maybe.map (Tuple.mapSecond Column)
+
+checkDiagWinner : Board -> Maybe ( Player, WinningDirection )
+checkDiagWinner = diags >> checkWinningGroup >> Maybe.map (Tuple.mapSecond Diagonal)
+
+isTied : Board -> Bool
+isTied = rows >> AUtils.all (AUtils.all ((/=) Empty))
+
+tryPlace : (Int, Int) -> Player -> Board -> (Board, BoardState)
+tryPlace (rowI, colI) player board =
     let
-        acc fn_ array_ i =
-            case Array.get i array_ of
-                Nothing ->
-                    False
+        playerAlreadyThere =
+            board
+            |> at (rowI, colI)
+            |> ((/=) Empty)
 
-                Just val ->
-                    if fn_ val then
-                        True
-
-                    else
-                        acc fn_ array_ (i + 1)
     in
-    acc fn array 0
+    if playerAlreadyThere then
+        (board, NextPlayer player)
+    else
+        let
+            newBoard : Board
+            newBoard =
+                board
+                    |> place (rowI, colI) player
 
-
-aall : (a -> Bool) -> Array a -> Bool
-aall fn array =
-    let
-        acc fn_ array_ i =
-            case Array.get i array_ of
-                Nothing ->
-                    True
-
-                Just val ->
-                    if fn val then
-                        acc fn_ array_ (i + 1)
-
-                    else
-                        False
-    in
-    acc fn array 0
-
+        in
+        case checkRowWinner newBoard of
+            Just (winningPlayer, winningRow) ->
+                ( newBoard
+                , Winner winningPlayer winningRow
+                )
+            Nothing ->
+                case checkColWinner newBoard of
+                    Just (winningPlayer, winningCol) ->
+                        ( newBoard
+                        , Winner winningPlayer winningCol
+                        )
+                    Nothing ->
+                        case checkDiagWinner newBoard of
+                            Just (winningPlayer, winningDiag) ->
+                                ( newBoard
+                                , Winner winningPlayer winningDiag
+                                )
+                            Nothing ->
+                                if isTied newBoard then
+                                    ( newBoard
+                                    , Draw
+                                    )
+                                else
+                                    ( newBoard
+                                    , NextPlayer <| nextPlayer player
+                                    )
 
 winner : Board -> Maybe Player
 winner board =
     let
         winningArray player arr =
-            aall ((==) (Occupied player)) arr
+            AUtils.all ((==) (Occupied player)) arr
 
         winningGroup : Player -> Array (Array Tile) -> Bool
         winningGroup player arrarr =
-            aany (winningArray player) arrarr
+            AUtils.any (winningArray player) arrarr
 
         playerWinning player =
             if winningGroup player (rows board) then

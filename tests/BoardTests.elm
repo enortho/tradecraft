@@ -3,7 +3,6 @@ module BoardTests exposing (..)
 import Test exposing (Test)
 import Test exposing (describe, test)
 import Expect
-import Fuzz
 import Board exposing (Tile(..), Player(..))
 
 suite : Test

@@ -19,8 +19,7 @@ main =
 init : () -> ( Model, Cmd Msg )
 init _ =
     ( { board = B.empty
-      , currentPlayer = B.X
-      , winner = Nothing
+      , boardStatus = B.NextPlayer B.X
       }
     , Cmd.none
     )
@@ -28,8 +27,7 @@ init _ =
 
 type alias Model =
     { board : Board
-    , currentPlayer : B.Player
-    , winner : Maybe B.Player
+    , boardStatus : B.BoardState
     }
 
 
@@ -39,28 +37,24 @@ type Msg
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    case msg of
-        TileClicked ( rowI, colI ) ->
-            if B.winner model.board /= Nothing then
-                ( model, Cmd.none )
+    case ( msg, model.boardStatus ) of
+        ( TileClicked _, B.Draw ) ->
+            ( model, Cmd.none )
 
-            else
-                let
-                    ( newBoard, nextPlayer, winner ) =
-                        case B.tryPlace ( rowI, colI ) model.currentPlayer model.board of
-                            ( Just board, winner_ ) ->
-                                ( board, B.nextPlayer model.currentPlayer, winner_ )
+        ( TileClicked _, B.Winner _ _ ) ->
+            ( model, Cmd.none )
 
-                            ( Nothing, _ ) ->
-                                ( model.board, model.currentPlayer, Nothing )
-                in
-                ( { model
-                    | board = newBoard
-                    , currentPlayer = nextPlayer
-                    , winner = winner
-                  }
-                , Cmd.none
-                )
+        ( TileClicked ( rowI, colI ), B.NextPlayer player ) ->
+            let
+                ( newBoard, newBoardStatus ) =
+                    B.tryPlace ( rowI, colI ) player model.board
+            in
+            ( { model
+                | board = newBoard
+                , boardStatus = newBoardStatus
+              }
+            , Cmd.none
+            )
 
 
 view model =
@@ -106,16 +100,31 @@ view model =
                             )
                     )
 
-        winnerText =
-            case model.winner of
-                Just player ->
-                    playerToStr player ++ " wins!!!!!!!!"
+        directionToStr : B.WinningDirection -> String
+        directionToStr dir =
+            case dir of
+                B.Row i ->
+                    "row " ++ String.fromInt i
 
-                Nothing ->
+                B.Column i ->
+                    "col " ++ String.fromInt i
+
+                B.Diagonal i ->
+                    "diagonal " ++ String.fromInt i
+
+        statusText =
+            case model.boardStatus of
+                B.Draw ->
+                    "Draw!"
+
+                B.Winner player direction ->
+                    "Player " ++ playerToStr player ++ " wins on " ++ directionToStr direction ++ "!!"
+
+                B.NextPlayer _ ->
                     ""
     in
     H.div []
         [ H.h1 [] [ H.text "Tic-Tac-Toe" ]
         , H.div [ A.class "board" ] boardHtml
-        , H.h2 [ A.style "text-align" "center" ] [ H.text winnerText ]
+        , H.h2 [ A.style "text-align" "center" ] [ H.text statusText ]
         ]
