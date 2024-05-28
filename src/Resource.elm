@@ -1,4 +1,6 @@
-module Resource exposing (Resource, coin, wood, resources, bricks)
+module Resource exposing (Resource, coin, wood, bricks, valueMap, resources)
+
+import Dict exposing (Dict)
 
 type alias Resource =
   { name : String
@@ -6,6 +8,7 @@ type alias Resource =
   , image : String
   , backgroundColor : String
   }
+
 
 coin : Resource
 coin =
@@ -31,5 +34,16 @@ bricks =
   , backgroundColor = ""
   }
 
+valueMap : Dict String Resource
+valueMap =
+    Dict.fromList
+        [ ( "coin", coin )
+        , ( "wood", wood )
+        , ( "brick", bricks )
+        ]
 resources : List Resource
-resources = [coin, wood, bricks]
+resources =
+    [ coin
+    , wood
+    , bricks
+    ]
