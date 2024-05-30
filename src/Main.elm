@@ -1,9 +1,8 @@
 module Main exposing (main)
 
 import Browser
-import Deal exposing (Deal)
 import Dict exposing (Dict)
-import Event
+import Event exposing (Deal, Event, Quest)
 import Html as H exposing (Html)
 import Html.Attributes as A
 import Html.Events as E
@@ -31,21 +30,15 @@ type alias Model =
     , triggers : List Event.ResourceTrigger
     , counts : Dict String Int
     , deals : Maybe (List Deal)
+    , quests : List Quest
     }
 
 
 type Msg
     = Noop
     | ResourceClicked Resource
-    | ResourceTriggersSatisfied Event.Event (List Event.Event)
+    | EventsReceived Event (List Event)
     | DealClicked Deal
-
-
-type alias ResourceGroup =
-    { clickable : List Resource
-    , viewable : List Resource
-    , locked : List Resource
-    }
 
 
 initialModel =
@@ -58,6 +51,7 @@ initialModel =
     , counts = Dict.empty
     , triggers = [ startDealsTrigger ]
     , deals = Nothing
+    , quests = []
     }
 
 
@@ -71,7 +65,8 @@ init _ =
       , autoScore = 0
       , counts = Dict.empty
       , triggers = [ startDealsTrigger ]
-      , deals = Just [ { sell = ( Resource.coin, 14 ), buy = ( Resource.wood, 20 ) } ]
+      , deals = Nothing
+      , quests = []
       }
     , Cmd.none
     )
@@ -80,27 +75,73 @@ init _ =
 startDealsTrigger : Event.ResourceTrigger
 startDealsTrigger =
     { resourcesNeeded = [ ( Resource.coin, 30 ) ]
-    , event = Event.StartDeals
+    , events =
+        [ Event.StartDeals
+        , Event.AddDeal
+            { sell = ( Resource.coin, 50 )
+            , buy = ( Resource.wood, 35 )
+            , events =
+                [ Event.MakeResourceViewable Resource.wood
+                ]
+            }
+        ]
     }
+
+
+applyEvents : List Event -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
+applyEvents events ( model, cmdmsg ) =
+    case events of
+        [] ->
+            ( model, cmdmsg )
+
+        first :: rest ->
+            let
+                ( newModel, newcmd ) =
+                    update (EventsReceived first rest) model
+            in
+            ( newModel
+            , Cmd.batch [ cmdmsg, newcmd ]
+            )
 
 
 checkResourceTriggers : ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
 checkResourceTriggers ( model, cmdmsg ) =
     let
-        ( eventsToSend, unsatisfiedTriggers ) =
+        ( eventsFromTriggers, unsatisfiedTriggers ) =
             model.triggers
-                |> Event.checkTriggers model.counts
+                |> Event.partitionTriggers model.counts
     in
-    case eventsToSend of
-        [] ->
-            ( model, cmdmsg )
+    let
+        ( newModel, newCmd ) =
+            applyEvents eventsFromTriggers ( model, cmdmsg )
+    in
+    ( { newModel | triggers = unsatisfiedTriggers }
+    , Cmd.batch [ cmdmsg, newCmd ]
+    )
 
-        firstEvent :: restEvents ->
-            let
-                ( newModel, newCmdMsg ) =
-                    update (ResourceTriggersSatisfied firstEvent restEvents) model
-            in
-            ( { newModel | triggers = unsatisfiedTriggers }, Cmd.batch [ cmdmsg, newCmdMsg ] )
+
+
+{-
+   checkResourceTriggers : List Event -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
+   checkResourceTriggers extraEvents ( model, cmdmsg ) =
+       let
+           ( eventsFromTriggers, unsatisfiedTriggers ) =
+               model.triggers
+                   |> Event.partitionTriggers model.counts
+       in
+       case eventsFromTriggers ++ extraEvents of
+           [] ->
+               ( model, cmdmsg )
+
+           firstEvent :: restEvents ->
+               let
+                   ( newModel, newCmdMsg ) =
+                       update (EventsReceived firstEvent restEvents) model
+               in
+               ( { newModel | triggers = unsatisfiedTriggers }
+               , Cmd.batch [ cmdmsg, newCmdMsg ]
+               )
+-}
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -153,13 +194,15 @@ update msg model =
                         model.counts
                             |> Dict.insert sellResource.name (sellResourceCountInInventory - sellResourceCount)
                             |> Dict.insert buyResource.name (buyResourceCountInInventory + buyResourceCount)
-                    , tradingScore = model.tradingScore + Deal.value deal
+                    , tradingScore = model.tradingScore + Event.dealValue deal
+                    , deals = model.deals |> Maybe.withDefault [] |> List.filter ((/=) deal) |> Just
                   }
                 , Cmd.none
                 )
                     |> checkResourceTriggers
+                    |> applyEvents deal.events
 
-        ResourceTriggersSatisfied firstEvent restEvents ->
+        EventsReceived firstEvent restEvents ->
             let
                 handleEvent : Event.Event -> Model -> Model
                 handleEvent event model_ =
@@ -167,19 +210,30 @@ update msg model =
                         Event.StartDeals ->
                             { model_
                                 | deals =
-                                    case model_.deals of
-                                        Just deals ->
-                                            Just deals
-
-                                        Nothing ->
-                                            Just []
+                                    model_.deals
+                                        |> mapNothing []
                             }
 
-                        Event.UnlockResource res ->
-                            model_
+                        Event.MakeResourceViewable res ->
+                            { model_
+                                | viewableResources = model_.viewableResources ++ [ res ]
+                            }
+
+                        Event.MakeResourceClickable res ->
+                            { model_
+                                | clickableResources = model_.clickableResources ++ [ res ]
+                                , viewableResources = model_.viewableResources |> List.filter (\r -> r.name /= res.name)
+                            }
 
                         Event.StartQuest quest ->
-                            model_
+                            { model_
+                                | quests = model_.quests ++ [ quest ]
+                            }
+
+                        Event.AddDeal deal ->
+                            { model_
+                                | deals = model_.deals |> Maybe.withDefault [] |> (\deals -> deals ++ [ deal ] |> Just)
+                            }
 
                 newModel =
                     List.foldl handleEvent model (firstEvent :: restEvents)
@@ -189,6 +243,12 @@ update msg model =
             )
 
 
+mapNothing : a -> Maybe a -> Maybe a
+mapNothing val maybe =
+    maybe |> Maybe.withDefault val |> Just
+
+
+margin0 : H.Attribute msg
 margin0 =
     A.style "margin" "0"
 
