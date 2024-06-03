@@ -7,21 +7,26 @@ import Html as H exposing (Html)
 import Html.Attributes as A
 import Html.Events as E
 import Platform.Cmd as Cmd
+import Process
+import Rand
+import Random
 import Resource exposing (Resource)
+import Task
 
 
-main : Program () Model Msg
+main : Program Int Model Msg
 main =
     Browser.element
         { init = init
         , update = update
         , view = view
-        , subscriptions = always Sub.none
+        , subscriptions = subscriptions
         }
 
 
 type alias Model =
-    { clickableResources : List Resource
+    { seed : Random.Seed
+    , clickableResources : List Resource
     , viewableResources : List Resource
     , lockedResources : List Resource
     , manualScore : Int
@@ -29,7 +34,9 @@ type alias Model =
     , autoScore : Int
     , triggers : List Event.ResourceTrigger
     , counts : Dict String Int
-    , deals : Maybe (List Deal)
+    , deals : Dict Int Deal
+    , generateDeals : Bool
+    , maxDeals : Int
     , quests : List Quest
     }
 
@@ -37,27 +44,15 @@ type alias Model =
 type Msg
     = Noop
     | ResourceClicked Resource
-    | EventsReceived Event (List Event)
-    | DealClicked Deal
+    | DealTaken Int Deal
+    | QuestFulfilled Quest
+    | GenerateNewDeal
 
 
-initialModel =
-    { clickableResources = [ Resource.coin ]
-    , viewableResources = []
-    , lockedResources = [ Resource.wood, Resource.bricks ]
-    , manualScore = 0
-    , tradingScore = 0
-    , autoScore = 0
-    , counts = Dict.empty
-    , triggers = [ startDealsTrigger ]
-    , deals = Nothing
-    , quests = []
-    }
-
-
-init : () -> ( Model, Cmd Msg )
-init _ =
-    ( { clickableResources = [ Resource.coin ]
+init : Int -> ( Model, Cmd Msg )
+init seedInit =
+    ( { seed = Random.initialSeed seedInit
+      , clickableResources = [ Resource.coin ]
       , viewableResources = []
       , lockedResources = [ Resource.wood, Resource.bricks ]
       , manualScore = 0
@@ -65,8 +60,10 @@ init _ =
       , autoScore = 0
       , counts = Dict.empty
       , triggers = [ startDealsTrigger ]
-      , deals = Nothing
-      , quests = []
+      , deals = Dict.empty
+      , maxDeals = 4
+      , generateDeals = False
+      , quests = [ Event.unlockWood ]
       }
     , Cmd.none
     )
@@ -78,6 +75,7 @@ startDealsTrigger =
     , events =
         [ Event.StartDeals
         , Event.AddDeal
+            0
             { sell = ( Resource.coin, 50 )
             , buy = ( Resource.wood, 35 )
             , events =
@@ -88,20 +86,56 @@ startDealsTrigger =
     }
 
 
-applyEvents : List Event -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
-applyEvents events ( model, cmdmsg ) =
-    case events of
-        [] ->
-            ( model, cmdmsg )
+after : Float -> msg -> Cmd msg
+after ms msg =
+    Process.sleep ms |> Task.perform (always msg)
 
-        first :: rest ->
-            let
-                ( newModel, newcmd ) =
-                    update (EventsReceived first rest) model
-            in
-            ( newModel
-            , Cmd.batch [ cmdmsg, newcmd ]
-            )
+
+applyEvents : List Event -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
+applyEvents events modelcmd =
+    let
+        handleEvent : Event.Event -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
+        handleEvent event ( model, cmdmsg ) =
+            case event of
+                Event.StartGeneratingDeals ->
+                    let
+                        ( timeUntilDealGenerated, seed0 ) =
+                            Random.step (Random.float 1000 10000) model_.seed
+                    in
+                    ( { model | seed = seed0 }
+                    , Cmd.batch [ cmdmsg, after timeUntilDealGenerated GenerateNewDeal ]
+                    )
+
+                Event.MakeResourceViewable res ->
+                    ( { model
+                        | viewableResources = model.viewableResources ++ [ res ]
+                      }
+                    , cmdmsg
+                    )
+
+                Event.MakeResourceClickable res ->
+                    ( { model
+                        | clickableResources = model.clickableResources ++ [ res ]
+                        , viewableResources = model.viewableResources |> List.filter (\r -> r.name /= res.name)
+                      }
+                    , cmdmsg
+                    )
+
+                Event.StartQuest quest ->
+                    ( { model
+                        | quests = model.quests ++ [ quest ]
+                      }
+                    , cmdmsg
+                    )
+
+                Event.AddDeal index deal ->
+                    ( { model
+                        | deals = model.deals |> Dict.insert index deal
+                      }
+                    , cmdmsg
+                    )
+    in
+    List.foldl handleEvent modelcmd events
 
 
 checkResourceTriggers : ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
@@ -118,30 +152,6 @@ checkResourceTriggers ( model, cmdmsg ) =
     ( { newModel | triggers = unsatisfiedTriggers }
     , Cmd.batch [ cmdmsg, newCmd ]
     )
-
-
-
-{-
-   checkResourceTriggers : List Event -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
-   checkResourceTriggers extraEvents ( model, cmdmsg ) =
-       let
-           ( eventsFromTriggers, unsatisfiedTriggers ) =
-               model.triggers
-                   |> Event.partitionTriggers model.counts
-       in
-       case eventsFromTriggers ++ extraEvents of
-           [] ->
-               ( model, cmdmsg )
-
-           firstEvent :: restEvents ->
-               let
-                   ( newModel, newCmdMsg ) =
-                       update (EventsReceived firstEvent restEvents) model
-               in
-               ( { newModel | triggers = unsatisfiedTriggers }
-               , Cmd.batch [ cmdmsg, newCmdMsg ]
-               )
--}
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -165,7 +175,7 @@ update msg model =
             )
                 |> checkResourceTriggers
 
-        DealClicked deal ->
+        DealTaken index deal ->
             let
                 ( sellResource, sellResourceCount ) =
                     deal.sell
@@ -178,74 +188,70 @@ update msg model =
                         |> Dict.get sellResource.name
                         |> Maybe.withDefault 0
             in
-            if sellResourceCountInInventory < sellResourceCount then
-                ( model, Cmd.none )
-
-            else
-                -- need to make the trade in the deal
-                ( { model
-                    | counts =
-                        let
-                            buyResourceCountInInventory =
-                                model.counts
-                                    |> Dict.get buyResource.name
-                                    |> Maybe.withDefault 0
-                        in
-                        model.counts
-                            |> Dict.insert sellResource.name (sellResourceCountInInventory - sellResourceCount)
-                            |> Dict.insert buyResource.name (buyResourceCountInInventory + buyResourceCount)
-                    , tradingScore = model.tradingScore + Event.dealValue deal
-                    , deals = model.deals |> Maybe.withDefault [] |> List.filter ((/=) deal) |> Just
-                  }
-                , Cmd.none
-                )
-                    |> checkResourceTriggers
-                    |> applyEvents deal.events
-
-        EventsReceived firstEvent restEvents ->
-            let
-                handleEvent : Event.Event -> Model -> Model
-                handleEvent event model_ =
-                    case event of
-                        Event.StartDeals ->
-                            { model_
-                                | deals =
-                                    model_.deals
-                                        |> mapNothing []
-                            }
-
-                        Event.MakeResourceViewable res ->
-                            { model_
-                                | viewableResources = model_.viewableResources ++ [ res ]
-                            }
-
-                        Event.MakeResourceClickable res ->
-                            { model_
-                                | clickableResources = model_.clickableResources ++ [ res ]
-                                , viewableResources = model_.viewableResources |> List.filter (\r -> r.name /= res.name)
-                            }
-
-                        Event.StartQuest quest ->
-                            { model_
-                                | quests = model_.quests ++ [ quest ]
-                            }
-
-                        Event.AddDeal deal ->
-                            { model_
-                                | deals = model_.deals |> Maybe.withDefault [] |> (\deals -> deals ++ [ deal ] |> Just)
-                            }
-
-                newModel =
-                    List.foldl handleEvent model (firstEvent :: restEvents)
-            in
-            ( newModel
+            -- need to make the trade in the deal
+            ( { model
+                | counts =
+                    let
+                        buyResourceCountInInventory =
+                            model.counts
+                                |> Dict.get buyResource.name
+                                |> Maybe.withDefault 0
+                    in
+                    model.counts
+                        |> Dict.insert sellResource.name (sellResourceCountInInventory - sellResourceCount)
+                        |> Dict.insert buyResource.name (buyResourceCountInInventory + buyResourceCount)
+                , tradingScore = model.tradingScore + Event.dealValue deal
+                , deals = model.deals |> Dict.remove index
+              }
             , Cmd.none
+            )
+                |> checkResourceTriggers
+                |> applyEvents deal.events
+
+        QuestFulfilled quest ->
+            let
+                newCounts =
+                    quest.cost
+                        |> List.foldl
+                            (\( res, resCount ) counts ->
+                                let
+                                    resCountInInventory =
+                                        counts |> Dict.get res.name |> Maybe.withDefault 0
+                                in
+                                counts
+                                    |> Dict.insert res.name (resCountInInventory - resCount)
+                            )
+                            model.counts
+            in
+            ( { model
+                | counts = newCounts
+                , quests = model.quests |> List.filter ((/=) quest)
+              }
+            , Cmd.none
+            )
+                |> applyEvents quest.events
+
+        GenerateNewDeal ->
+            let
+                ( deal, seed0 ) =
+                    Random.step (Rand.generateDeal Resource.coin Resource.wood [ Resource.bricks ]) model.seed
+
+                ( position, seed1 ) =
+                    Random.step (Random.int 0 (model.maxDeals - 1)) seed0
+
+                ( timeUntilNextDealGenerated, seed2 ) =
+                    Random.step (Random.float 1000 10000) seed1
+            in
+            ( { model
+                | seed = seed2
+                , deals = model.deals |> Dict.insert position deal
+              }
+            , after timeUntilNextDealGenerated GenerateNewDeal
             )
 
 
-mapNothing : a -> Maybe a -> Maybe a
-mapNothing val maybe =
-    maybe |> Maybe.withDefault val |> Just
+subscriptions model =
+    Sub.none
 
 
 margin0 : H.Attribute msg
@@ -264,21 +270,121 @@ view model =
             , A.style "flex-direction" "column"
             , A.style "align-items" "center"
             ]
-            (case model.deals of
-                Just deals ->
-                    [ viewDeals model.counts deals, viewResources model, viewScoreBar model ]
-
-                Nothing ->
-                    [ viewResources model, viewScoreBar model ]
-            )
-        , H.p
-            []
-            [ H.text "" ]
+            [ viewDeals model.counts model.deals
+            , viewResources model
+            , viewScoreBar model
+            ]
+        , viewQuests model.counts model.quests
         ]
 
 
-viewDeals : Dict String Int -> List Deal -> Html Msg
+viewDeals : Dict String Int -> Dict Int Deal -> Html Msg
 viewDeals counts deals =
+    let
+        greatestIndex =
+            Debug.log "deals" deals
+                |> Dict.toList
+                |> List.map Tuple.first
+                |> List.maximum
+                |> Maybe.withDefault 0
+
+        htmlDeals =
+            List.range 0 greatestIndex
+                |> List.map
+                    (\index ->
+                        case Dict.get index deals of
+                            Just deal ->
+                                Debug.log "hi" <| viewDeal index deal
+
+                            Nothing ->
+                                Debug.log "hii" <| viewEmptyDeal
+                    )
+
+        viewEmptyDeal =
+            H.div [ A.style "display" "none" ]
+                [ viewDeal 0 { sell = ( Resource.coin, 10 ), buy = ( Resource.coin, 10 ), events = [] }
+                ]
+
+        viewDeal index deal =
+            let
+                ( sellResource, sellResourceCount ) =
+                    deal.sell
+
+                ( buyResource, buyResourceCount ) =
+                    deal.buy
+
+                sellResourceCountInInventory =
+                    counts
+                        |> Dict.get sellResource.name
+                        |> Maybe.withDefault 0
+
+                canCompleteDeal =
+                    sellResourceCountInInventory >= sellResourceCount
+
+                backgroundColor =
+                    if canCompleteDeal then
+                        "#88ff88"
+
+                    else
+                        "#ff8888"
+            in
+            H.button
+                [ A.style "background" backgroundColor
+                , A.style "border" "1px solid black"
+                , A.style "padding" "1rem 1rem"
+                , E.onClick
+                    (if canCompleteDeal then
+                        DealTaken index deal
+
+                     else
+                        Noop
+                    )
+                ]
+                [ H.span
+                    [ A.style "display" "flex"
+                    , A.style "align-items" "center"
+                    , A.style "font-weight" "bold"
+                    , A.style "font-size" "1.1rem"
+                    , A.style "padding" ".5rem"
+                    , A.style "background-image" "url(/arrowred.png)"
+                    , A.style "background-size" "50% 100%"
+                    , A.style "background-repeat" "no-repeat"
+                    , A.style "background-position" "right top"
+                    ]
+                    [ H.text <| String.fromInt sellResourceCount ++ "x"
+                    , H.img
+                        [ A.src sellResource.image
+                        , A.width 24
+                        , A.height 24
+                        ]
+                        []
+                    ]
+                , H.span
+                    [ A.style "display" "flex"
+                    , A.style "align-items" "center"
+                    , A.style "justify-content" "center"
+                    , A.style "font-weight" "bold"
+                    , A.style "font-size" "1.1rem"
+                    , A.style "padding" ".5rem"
+                    , A.style "background-image" "url(/arrowgreen.png)"
+                    , A.style "background-size" "50% 100%"
+                    , A.style "background-position" "left top"
+                    , A.style "background-repeat" "no-repeat"
+                    ]
+                    [ H.img
+                        [ A.src buyResource.image
+                        , A.width 24
+                        , A.height 24
+                        ]
+                        []
+                    , H.text <| "x" ++ String.fromInt buyResourceCount
+                    ]
+                ]
+    in
+    let
+        hi =
+            Debug.log "htmldealslength" (List.length htmlDeals)
+    in
     H.div
         [ margin0
         , A.style "width" "100%"
@@ -286,76 +392,7 @@ viewDeals counts deals =
         , A.style "display" "grid"
         , A.style "grid-template-columns" "1fr 1fr 1fr 1fr"
         ]
-        (deals
-            |> List.map
-                (\deal ->
-                    let
-                        ( sellResource, sellResourceCount ) =
-                            deal.sell
-
-                        ( buyResource, buyResourceCount ) =
-                            deal.buy
-
-                        sellResourceCountInInventory =
-                            counts
-                                |> Dict.get sellResource.name
-                                |> Maybe.withDefault 0
-
-                        backgroundColor =
-                            if sellResourceCountInInventory < sellResourceCount then
-                                "#ff8888"
-
-                            else
-                                "#88ff88"
-                    in
-                    H.button
-                        [ A.style "background" backgroundColor
-                        , A.style "border" "1px solid black"
-                        , A.style "padding" "1rem 1rem"
-                        , E.onClick (DealClicked deal)
-                        ]
-                        [ H.span
-                            [ A.style "display" "flex"
-                            , A.style "align-items" "center"
-                            , A.style "font-weight" "bold"
-                            , A.style "font-size" "1.1rem"
-                            , A.style "padding" ".5rem"
-                            , A.style "background-image" "url(/arrowred.png)"
-                            , A.style "background-size" "50% 100%"
-                            , A.style "background-repeat" "no-repeat"
-                            , A.style "background-position" "right top"
-                            ]
-                            [ H.text <| String.fromInt sellResourceCount ++ "x"
-                            , H.img
-                                [ A.src sellResource.image
-                                , A.width 24
-                                , A.height 24
-                                ]
-                                []
-                            ]
-                        , H.span
-                            [ A.style "display" "flex"
-                            , A.style "align-items" "center"
-                            , A.style "justify-content" "center"
-                            , A.style "font-weight" "bold"
-                            , A.style "font-size" "1.1rem"
-                            , A.style "padding" ".5rem"
-                            , A.style "background-image" "url(/arrowgreen.png)"
-                            , A.style "background-size" "50% 100%"
-                            , A.style "background-position" "left top"
-                            , A.style "background-repeat" "no-repeat"
-                            ]
-                            [ H.img
-                                [ A.src buyResource.image
-                                , A.width 24
-                                , A.height 24
-                                ]
-                                []
-                            , H.text <| "x" ++ String.fromInt buyResourceCount
-                            ]
-                        ]
-                )
-        )
+        htmlDeals
 
 
 viewScoreBar : { r | manualScore : Int, tradingScore : Int, autoScore : Int } -> Html msg
@@ -450,3 +487,70 @@ viewResource count colouredBackground clickMsg resource =
         , H.p [ margin0 ]
             [ H.text resource.name ]
         ]
+
+
+viewQuests : Dict String Int -> List Quest -> Html Msg
+viewQuests counts quests =
+    let
+        viewQuest : Quest -> Html Msg
+        viewQuest quest =
+            let
+                canCompleteQuest =
+                    quest.cost
+                        |> List.all
+                            (\( res, resCountNeeded ) ->
+                                let
+                                    countInInventory =
+                                        counts |> Dict.get res.name |> Maybe.withDefault 0
+                                in
+                                countInInventory >= resCountNeeded
+                            )
+
+                backgroundColor =
+                    if canCompleteQuest then
+                        "#88FF88"
+
+                    else
+                        "#FF8888"
+            in
+            H.button
+                [ A.style "background" "white"
+                , A.style "border" "none"
+                , A.style "background" backgroundColor
+                , A.style "padding" "16px"
+                , E.onClick
+                    (if canCompleteQuest then
+                        QuestFulfilled quest
+
+                     else
+                        Noop
+                    )
+                ]
+                [ H.h3
+                    [ A.style "margin" "0 0 8px 0"
+                    ]
+                    [ H.text quest.title
+                    ]
+                , H.div
+                    [ A.style "display" "flex"
+                    , A.style "flex-direction" "row"
+                    , A.style "gap" "8px"
+                    ]
+                    [ H.div []
+                        (quest.cost
+                            |> List.map
+                                (\( res, resCount ) ->
+                                    H.div [ A.style "display" "flex", A.style "align-items" "center" ]
+                                        [ H.text <| String.fromInt resCount
+                                        , H.span [ A.style "margin" "0 2px" ] [ H.text "x" ]
+                                        , H.img [ A.src res.image, A.width 30, A.height 30 ] []
+                                        ]
+                                )
+                        )
+                    , H.p [ margin0 ]
+                        [ H.text quest.description
+                        ]
+                    ]
+                ]
+    in
+    H.div [] (List.map viewQuest quests)

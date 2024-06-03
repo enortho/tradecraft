@@ -7,8 +7,8 @@ type Event
     = MakeResourceViewable Resource
     | MakeResourceClickable Resource
     | StartQuest Quest
-    | StartDeals
-    | AddDeal Deal
+    | StartGeneratingDeals
+    | AddDeal Int Deal
 
 
 type alias ResourceTrigger =
@@ -39,6 +39,7 @@ partitionTriggers counts triggers =
 
 type alias Quest =
     { cost : List ( Resource, Int )
+    , title : String
     , description : String
     , events : List Event
     }
@@ -46,9 +47,10 @@ type alias Quest =
 
 unlockWood : Quest
 unlockWood =
-    { cost = [ ( Resource.coin, 50 ) ]
-    , description = "Unlock wooddddd"
-    , events = [ MakeResourceViewable Resource.wood ]
+    { cost = [ ( Resource.coin, 30 ), ( Resource.wood, 10 ) ]
+    , title = "Work gloves"
+    , description = "This is your first upgrade. Lets you click for wood"
+    , events = [ MakeResourceClickable Resource.wood ]
     }
 
 
