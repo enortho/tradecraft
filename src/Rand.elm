@@ -14,16 +14,20 @@ generateDeal first_ second_ rest =
                     (R.uniform first rest)
                     (R.int 1 200)
                     |> R.andThen
-                        (\sell ->
+                        (\(sellRes, sellCount) ->
                             R.map2 Tuple.pair
                                 (R.uniform second rest)
                                 (R.int 1 200)
-                                |> R.map
-                                    (\buy ->
-                                        { sell = sell
-                                        , buy = buy
-                                        , events = []
-                                        }
+                                |> R.andThen
+                                    (\(buyRes, buyCount) ->
+                                        if sellRes.name == buyRes.name then
+                                            generateDeal first_ second_ rest
+                                        else
+                                            R.constant
+                                                { sell = (sellRes, sellCount)
+                                                , buy = (buyRes, buyCount)
+                                                , events = []
+                                                }
                                     )
                         )
             )

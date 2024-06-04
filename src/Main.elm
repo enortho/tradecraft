@@ -46,7 +46,8 @@ type Msg
     | ResourceClicked Resource
     | DealTaken Int Deal
     | QuestFulfilled Quest
-    | GenerateNewDeal
+    | RandomDealDelayReceived Float
+    | NewDealGenerated { deal : Deal, position : Int }
 
 
 init : Int -> ( Model, Cmd Msg )
@@ -73,7 +74,7 @@ startDealsTrigger : Event.ResourceTrigger
 startDealsTrigger =
     { resourcesNeeded = [ ( Resource.coin, 30 ) ]
     , events =
-        [ Event.StartDeals
+        [ Event.StartGeneratingDeals
         , Event.AddDeal
             0
             { sell = ( Resource.coin, 50 )
@@ -98,12 +99,8 @@ applyEvents events modelcmd =
         handleEvent event ( model, cmdmsg ) =
             case event of
                 Event.StartGeneratingDeals ->
-                    let
-                        ( timeUntilDealGenerated, seed0 ) =
-                            Random.step (Random.float 1000 10000) model_.seed
-                    in
-                    ( { model | seed = seed0 }
-                    , Cmd.batch [ cmdmsg, after timeUntilDealGenerated GenerateNewDeal ]
+                    ( model
+                    , Cmd.batch [ cmdmsg, genDealAfterDelay ]
                     )
 
                 Event.MakeResourceViewable res ->
@@ -153,6 +150,13 @@ checkResourceTriggers ( model, cmdmsg ) =
     , Cmd.batch [ cmdmsg, newCmd ]
     )
 
+genDealAfterDelay : Cmd Msg
+genDealAfterDelay =
+        Random.float 1000 7000
+            |> Random.generate RandomDealDelayReceived
+
+        
+            
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
@@ -231,22 +235,26 @@ update msg model =
             )
                 |> applyEvents quest.events
 
-        GenerateNewDeal ->
-            let
-                ( deal, seed0 ) =
-                    Random.step (Rand.generateDeal Resource.coin Resource.wood [ Resource.bricks ]) model.seed
-
-                ( position, seed1 ) =
-                    Random.step (Random.int 0 (model.maxDeals - 1)) seed0
-
-                ( timeUntilNextDealGenerated, seed2 ) =
-                    Random.step (Random.float 1000 10000) seed1
-            in
+        NewDealGenerated { deal, position } ->
             ( { model
-                | seed = seed2
-                , deals = model.deals |> Dict.insert position deal
+                | deals = model.deals |> Dict.insert position deal
               }
-            , after timeUntilNextDealGenerated GenerateNewDeal
+            , genDealAfterDelay
+            )
+        
+        RandomDealDelayReceived timeUntilNextDealGenerated ->
+            let
+                
+                generate = 
+                    Random.map2 (\deal position -> { deal = deal, position = position})
+                        (Rand.generateDeal Resource.coin Resource.wood [Resource.bricks])
+                        (Random.int 0 (model.maxDeals - 1))
+                
+                (newDealInfo, seed0) = Random.step generate model.seed
+                        
+            in
+            ( { model | seed = seed0 }
+            , after timeUntilNextDealGenerated (NewDealGenerated newDealInfo)
             )
 
 
