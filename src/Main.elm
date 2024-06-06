@@ -150,13 +150,12 @@ checkResourceTriggers ( model, cmdmsg ) =
     , Cmd.batch [ cmdmsg, newCmd ]
     )
 
+
 genDealAfterDelay : Cmd Msg
 genDealAfterDelay =
-        Random.float 1000 7000
-            |> Random.generate RandomDealDelayReceived
+    Random.float 1000 7000
+        |> Random.generate RandomDealDelayReceived
 
-        
-            
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
@@ -241,17 +240,16 @@ update msg model =
               }
             , genDealAfterDelay
             )
-        
+
         RandomDealDelayReceived timeUntilNextDealGenerated ->
             let
-                
-                generate = 
-                    Random.map2 (\deal position -> { deal = deal, position = position})
-                        (Rand.generateDeal Resource.coin Resource.wood [Resource.bricks])
+                generate =
+                    Random.map2 (\deal position -> { deal = deal, position = position })
+                        (Rand.generateDeal Resource.coin Resource.wood [ Resource.bricks ])
                         (Random.int 0 (model.maxDeals - 1))
-                
-                (newDealInfo, seed0) = Random.step generate model.seed
-                        
+
+                ( newDealInfo, seed0 ) =
+                    Random.step generate model.seed
             in
             ( { model | seed = seed0 }
             , after timeUntilNextDealGenerated (NewDealGenerated newDealInfo)
