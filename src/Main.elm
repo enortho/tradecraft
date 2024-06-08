@@ -1,6 +1,8 @@
 module Main exposing (main)
 
+import Array exposing (Array)
 import Browser
+import GameThings
 import Dict exposing (Dict)
 import Event exposing (Deal, Event, Quest)
 import Html as H exposing (Html)
@@ -27,7 +29,6 @@ main =
 
 type alias Model =
     { seed : Random.Seed
-    , unlockedResources : List Resource
     , manualScore : Int
     , tradingScore : Int
     , autoScore : Int
@@ -57,13 +58,12 @@ type Msg
 init : Int -> ( Model, Cmd Msg )
 init seedInit =
     ( { seed = Random.initialSeed seedInit
-      , unlockedResources = [ Resource.coin ]
       , manualScore = 0
       , tradingScore = 0
       , autoScore = 0
       , counts = Dict.empty
       , clickValues = Dict.empty |> Dict.insert Resource.coin.name 1
-      , triggers = [ firstDealTrigger ]
+      , triggers = [ GameThings.initTrigger ]
       , autoclicks = []
       , deals = Dict.empty
       , maxDeals = 4
@@ -74,23 +74,6 @@ init seedInit =
       }
     , Cmd.none
     )
-
-
-firstDealTrigger : Event.ResourceTrigger
-firstDealTrigger =
-    { resourcesNeeded = [ ( Resource.coin, 30 ) ]
-    , events =
-        [ Event.AddDeal
-            0
-            { sell = ( Resource.coin, 50 )
-            , buy = ( Resource.wood, 35 )
-            , events =
-                [ Event.UnlockResource Resource.wood
-                ]
-            }
-        ]
-    }
-
 
 after : Float -> msg -> Cmd msg
 after ms msg =
@@ -108,12 +91,6 @@ applyEvents events modelcmd =
                     , Cmd.batch [ cmdmsg, genDealAfterDelay ]
                     )
 
-                Event.UnlockResource res ->
-                    ( { model
-                        | unlockedResources = model.unlockedResources ++ [ res ]
-                      }
-                    , cmdmsg
-                    )
 
                 Event.AddQuest position quest ->
                     ( case position of
@@ -156,7 +133,7 @@ applyEvents events modelcmd =
                     )
                 
                 Event.AddDealCapacity capacityToAdd ->
-                    ( { model | maxDeals = maxDeals + capacityToAdd }
+                    ( { model | maxDeals = model.maxDeals + capacityToAdd }
                     , cmdmsg
                     )
     in
@@ -498,28 +475,76 @@ viewScoreBar { manualScore, tradingScore, autoScore } =
             [ H.text <| "Manual score: " ++ String.fromInt manualScore ++ " ; Trading score: " ++ String.fromInt tradingScore ++ " ; Auto score: " ++ String.fromInt autoScore ]
         ]
 
+arrayLastWhere : (a -> Bool) -> Array a -> Maybe (Int, a)
+arrayLastWhere fn array =
+    arrayLastWhereHelp fn array (Array.length array - 1) (Array.length array)
 
-viewResources : { r | unlockedResources : List Resource, counts : Dict String Int, clickValues : Dict String Int } -> Html Msg
-viewResources { unlockedResources, counts, clickValues } =
+arrayLastWhereHelp : (a -> Bool) -> Array a -> Int -> Int -> Maybe (Int, a)
+arrayLastWhereHelp fn array i n =
+    if i < 0 then
+        Nothing
+    else
+        case Array.get i array of
+            Just a ->
+                if fn a then
+                    Just (i, a)
+                else
+                    arrayLastWhereHelp fn array (i - 1) n
+            Nothing ->
+                arrayLastWhereHelp fn array (i - 1) n
+
+
+viewResources : { r | counts : Dict String Int, clickValues : Dict String Int } -> Html Msg
+viewResources { counts, clickValues } =
     let
+        bestResourceUnlockedIndex : Int
+        bestResourceUnlockedIndex =
+            Resource.resourceArray
+                |> arrayLastWhere
+                    (\res ->
+                        counts
+                            |> Dict.get res.name
+                            |> Maybe.withDefault 0
+                            |> \count -> count > 0
+                    )
+                |> Maybe.map Tuple.first
+                |> Maybe.withDefault 0
+
+        bestResourceUnlockedIndexPlusOne : Int
+        bestResourceUnlockedIndexPlusOne =
+            min (bestResourceUnlockedIndex + 1) (Resource.numResources - 1)
+
         htmlResources : List (Html Msg)
         htmlResources =
-            unlockedResources
+            if bestResourceUnlockedIndexPlusOne == 1 then
+                -- exception: if only coin is unlocked, don't show wood!
+                [ viewResource (counts |> Dict.get Resource.coin.name |> Maybe.withDefault 0) True (ResourceClicked Resource.coin) Resource.coin
+                ]
+            else
+            List.range 0 bestResourceUnlockedIndexPlusOne
                 |> List.map
-                    (\res ->
+                    (\index ->
                         let
-                            count = counts |> Dict.get res.name |> Maybe.withDefault 0
+                            res =
+                                Resource.resourceArray
+                                    |> Array.get index
+                                    |> Maybe.withDefault Resource.coin  -- shouldnt fall through bc of how the indices are calculated above
+
+                            count =
+                                counts |> Dict.get res.name |> Maybe.withDefault 0
+
                             useColouredBackground =
                                 clickValues
-                                |> Dict.get res.name
-                                |> Maybe.withDefault 0
-                                |> \clickValue -> clickValue > 0
+                                    |> Dict.get res.name
+                                    |> Maybe.withDefault 0
+                                    |> \clickValue -> clickValue > 0
                         in
                         viewResource count useColouredBackground (ResourceClicked res) res
                     )
 
+
         numResources =
-            List.length unlockedResources
+            List.length htmlResources
 
         numColumns =
             min numResources 4

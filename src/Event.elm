@@ -4,8 +4,7 @@ import Dict exposing (Dict)
 import Resource exposing (Resource)
 
 type Event
-    = UnlockResource Resource
-    | AddQuest QuestPosition Quest
+    = AddQuest QuestPosition Quest
     | StartGeneratingDeals
     | AddDeal Int Deal
     | SetClickValueForResource String Int

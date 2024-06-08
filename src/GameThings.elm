@@ -11,9 +11,7 @@ initTrigger =
           { sell = ( Res.coin, 50 )
           , buy = ( Res.wood, 35)
           , events =
-              [ Event.UnlockResource Res.wood
-              , Event.SetClickValueForResource "wood" 1
-              , Event.UnlockResource Res.bricks
+              [ Event.SetClickValueForResource "wood" 1
               , Event.AddResourceTrigger
                   { resourcesNeeded = [ ( Res.coin, 16 )]
                   , events =
@@ -23,8 +21,8 @@ initTrigger =
                           , cost = [ ( Res.coin, 30 ), ( Res.wood, 10 )]
                           , events = 
                               [ Event.AddDeal 0
-                                  { sell = [(Res.wood, 30)]
-                                  , buy = [(Res.bricks, 20)]
+                                  { sell = (Res.wood, 30)
+                                  , buy = (Res.bricks, 20)
                                   , events = []
                                   }
                               , Event.SetClickValueForResource Res.wood.name 1
@@ -45,7 +43,8 @@ initTrigger =
                                                   , description = "Lets you get bricks manually."
                                                   , cost = [(Res.coin, 60), (Res.bricks, 20)]
                                                   , events =
-                                                      [ Event.AddQuest Event.First
+                                                      [ Event.SetClickValueForResource Res.bricks.name 1
+                                                      , Event.AddQuest Event.First
                                                           { title = "Iron axe"
                                                           , description = "Mine wood twice as fast!"
                                                           , cost = [(Res.wood, 20), (Res.iron, 2)]
@@ -123,7 +122,7 @@ initTrigger =
                                                                                                             , description = "Double the amount of coins you gain automatically!"
                                                                                                             , cost = [(Res.coin, 3000)]
                                                                                                             , events = 
-                                                                                                                [ Res.SetAutoGeneration Res.coin 1000
+                                                                                                                [ Event.SetAutoGeneration Res.coin 1000
                                                                                                                 , Event.AddQuest Event.Second
                                                                                                                     { title = "Motherload Machine"
                                                                                                                     , description = "Gain copper over time! And a bit of iron on top of that!"

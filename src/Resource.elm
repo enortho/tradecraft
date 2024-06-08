@@ -1,40 +1,44 @@
 module Resource exposing (..)
 
-import Dict exposing (Dict)
-import Random
-import List exposing (append)
 import Array exposing (Array)
+import Dict exposing (Dict)
+import List exposing (append)
+import Random
+
 
 type alias Resource =
-  { name : String
-  , value : Int
-  , image : String
-  , backgroundColor : String
-  }
+    { name : String
+    , value : Int
+    , image : String
+    , backgroundColor : String
+    }
+
 
 coin : Resource
 coin =
-  { name = "coin"
-  , value = 1
-  , image = "/coin.png"
-  , backgroundColor = "#ffff88"
-  }
+    { name = "coin"
+    , value = 1
+    , image = "/coin.png"
+    , backgroundColor = "#ffff88"
+    }
+
 
 wood : Resource
 wood =
-  { name = "wood"
-  , value = 2
-  , image = "/wood.png"
-  , backgroundColor = "#bb6800"
-  }
+    { name = "wood"
+    , value = 2
+    , image = "/wood.png"
+    , backgroundColor = "#bb6800"
+    }
+
 
 bricks : Resource
 bricks =
-  { name = "bricks"
-  , value = 5
-  , image = "/bricks.png"
-  , backgroundColor = "#ff9900"
-  }
+    { name = "bricks"
+    , value = 5
+    , image = "/bricks.png"
+    , backgroundColor = "#ff9900"
+    }
 
 
 copper : Resource
@@ -173,23 +177,37 @@ stardust =
 
 
 firstResource : Resource
-firstResource = coin
+firstResource =
+    coin
 
 
 restResources : List Resource
 restResources =
     [ wood
     , bricks
+    , copper
+    , iron
+    , silver
+    , gold
+    , plat
+    , emerald
+    , ruby
+    , opal
+    , amethyst
+    , citrine
+    , carbon
+    , diamond
+    , purplemetal
+    , bloodgem
+    , stardust
     ]
+
 
 resourceArray : Array Resource
 resourceArray =
-    Array.fromList
-        [ coin
-        , wood
-        , bricks
-        ]
+    Array.fromList <| firstResource :: restResources
 
 
 numResources : Int
-numResources = Array.length resourceArray
+numResources =
+    Array.length resourceArray
