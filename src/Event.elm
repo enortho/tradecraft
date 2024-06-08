@@ -5,10 +5,13 @@ import Resource exposing (Resource)
 
 type Event
     = UnlockResource Resource
-    | StartQuest Quest
+    | AddQuest QuestPosition Quest
     | StartGeneratingDeals
     | AddDeal Int Deal
     | SetClickValueForResource String Int
+    | AddResourceTrigger ResourceTrigger
+    | SetAutoGeneration Resource Float
+    | AddDealCapacity Int
 
 type alias ResourceTrigger =
     { resourcesNeeded : List ( Resource, Int )
@@ -42,6 +45,11 @@ type alias Quest =
     , description : String
     , events : List Event
     }
+
+type QuestPosition
+    = First
+    | Second
+    | Third
 
 
 type alias Deal =

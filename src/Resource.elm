@@ -33,7 +33,7 @@ bricks =
   { name = "bricks"
   , value = 5
   , image = "/bricks.png"
-  , backgroundColor = ""
+  , backgroundColor = "#ff9900"
   }
 
 
@@ -42,7 +42,7 @@ copper =
     { name = "copper"
     , value = 10
     , image = "/copper.png"
-    , backgroundColor = ""
+    , backgroundColor = "#dd3333"
     }
 
 
