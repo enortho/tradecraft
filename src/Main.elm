@@ -26,14 +26,13 @@ main =
 
 type alias Model =
     { seed : Random.Seed
-    , clickableResources : List Resource
-    , viewableResources : List Resource
-    , lockedResources : List Resource
+    , unlockedResources : List Resource
     , manualScore : Int
     , tradingScore : Int
     , autoScore : Int
     , triggers : List Event.ResourceTrigger
     , counts : Dict String Int
+    , clickValues : Dict String Int
     , deals : Dict Int Deal
     , generateDeals : Bool
     , maxDeals : Int
@@ -53,34 +52,32 @@ type Msg
 init : Int -> ( Model, Cmd Msg )
 init seedInit =
     ( { seed = Random.initialSeed seedInit
-      , clickableResources = [ Resource.coin ]
-      , viewableResources = []
-      , lockedResources = [ Resource.wood, Resource.bricks ]
+      , unlockedResources = [ Resource.coin ]
       , manualScore = 0
       , tradingScore = 0
       , autoScore = 0
       , counts = Dict.empty
-      , triggers = [ startDealsTrigger ]
+      , clickValues = Dict.empty |> Dict.insert Resource.coin.name 1
+      , triggers = [ firstDealTrigger ]
       , deals = Dict.empty
       , maxDeals = 4
       , generateDeals = False
-      , quests = [ Event.unlockWood ]
+      , quests = []
       }
     , Cmd.none
     )
 
 
-startDealsTrigger : Event.ResourceTrigger
-startDealsTrigger =
+firstDealTrigger : Event.ResourceTrigger
+firstDealTrigger =
     { resourcesNeeded = [ ( Resource.coin, 30 ) ]
     , events =
-        [ Event.StartGeneratingDeals
-        , Event.AddDeal
+        [ Event.AddDeal
             0
             { sell = ( Resource.coin, 50 )
             , buy = ( Resource.wood, 35 )
             , events =
-                [ Event.MakeResourceViewable Resource.wood
+                [ Event.UnlockResource Resource.wood
                 ]
             }
         ]
@@ -103,17 +100,9 @@ applyEvents events modelcmd =
                     , Cmd.batch [ cmdmsg, genDealAfterDelay ]
                     )
 
-                Event.MakeResourceViewable res ->
+                Event.UnlockResource res ->
                     ( { model
-                        | viewableResources = model.viewableResources ++ [ res ]
-                      }
-                    , cmdmsg
-                    )
-
-                Event.MakeResourceClickable res ->
-                    ( { model
-                        | clickableResources = model.clickableResources ++ [ res ]
-                        , viewableResources = model.viewableResources |> List.filter (\r -> r.name /= res.name)
+                        | unlockedResources = model.unlockedResources ++ [ res ]
                       }
                     , cmdmsg
                     )
@@ -128,6 +117,12 @@ applyEvents events modelcmd =
                 Event.AddDeal index deal ->
                     ( { model
                         | deals = model.deals |> Dict.insert index deal
+                      }
+                    , cmdmsg
+                    )
+
+                Event.SetClickValueForResource resName newClickVal ->
+                    ( { model | clickValues = model.clickValues |> Dict.insert resName newClickVal
                       }
                     , cmdmsg
                     )
@@ -169,10 +164,17 @@ update msg model =
                     model.counts
                         |> Dict.get res.name
                         |> Maybe.withDefault 0
+
+                clickValue =
+                    model.clickValues
+                        |> Dict.get res.name
+                        |> Maybe.withDefault 0
+
+                totalValueGenerated = clickValue * res.value
             in
             ( { model
-                | counts = model.counts |> Dict.insert res.name (currentCount + 1)
-                , manualScore = model.manualScore + res.value
+                | counts = model.counts |> Dict.insert res.name (currentCount + clickValue)
+                , manualScore = model.manualScore + totalValueGenerated
               }
             , Cmd.none
             )
@@ -245,7 +247,7 @@ update msg model =
             let
                 generate =
                     Random.map2 (\deal position -> { deal = deal, position = position })
-                        (Rand.generateDeal Resource.coin Resource.wood [ Resource.bricks ])
+                        (Rand.genDeal { counts = model.counts })
                         (Random.int 0 (model.maxDeals - 1))
 
                 ( newDealInfo, seed0 ) =
@@ -256,8 +258,8 @@ update msg model =
             )
 
 
-subscriptions model =
-    Sub.none
+subscriptions : Model -> Sub Msg
+subscriptions = always Sub.none
 
 
 margin0 : H.Attribute msg
@@ -276,7 +278,7 @@ view model =
             , A.style "flex-direction" "column"
             , A.style "align-items" "center"
             ]
-            [ viewDeals model.counts model.deals
+            [ viewDeals model
             , viewResources model
             , viewScoreBar model
             ]
@@ -284,8 +286,8 @@ view model =
         ]
 
 
-viewDeals : Dict String Int -> Dict Int Deal -> Html Msg
-viewDeals counts deals =
+viewDeals : { r | counts : Dict String Int, clickValues : Dict String Int, deals : Dict Int Deal } -> Html Msg
+viewDeals { counts, deals } =
     let
         greatestIndex =
             Debug.log "deals" deals
@@ -307,7 +309,7 @@ viewDeals counts deals =
                     )
 
         viewEmptyDeal =
-            H.div [ A.style "display" "none" ]
+            H.div [ A.style "visibility" "hidden" ]
                 [ viewDeal 0 { sell = ( Resource.coin, 10 ), buy = ( Resource.coin, 10 ), events = [] }
                 ]
 
@@ -422,35 +424,27 @@ viewScoreBar { manualScore, tradingScore, autoScore } =
         ]
 
 
-viewResources : { r | clickableResources : List Resource, viewableResources : List Resource, counts : Dict String Int } -> Html Msg
-viewResources model =
+viewResources : { r | unlockedResources : List Resource, counts : Dict String Int, clickValues : Dict String Int } -> Html Msg
+viewResources { unlockedResources, counts, clickValues } =
     let
-        clickableResources : List (Html Msg)
-        clickableResources =
-            model.clickableResources
+        htmlResources : List (Html Msg)
+        htmlResources =
+            unlockedResources
                 |> List.map
                     (\res ->
                         let
-                            count =
-                                model.counts |> Dict.get res.name |> Maybe.withDefault 0
+                            count = counts |> Dict.get res.name |> Maybe.withDefault 0
+                            useColouredBackground =
+                                clickValues
+                                |> Dict.get res.name
+                                |> Maybe.withDefault 0
+                                |> \clickValue -> clickValue > 0
                         in
-                        viewResource count True (ResourceClicked res) res
-                    )
-
-        viewableResources : List (Html Msg)
-        viewableResources =
-            model.viewableResources
-                |> List.map
-                    (\res ->
-                        let
-                            count =
-                                model.counts |> Dict.get res.name |> Maybe.withDefault 0
-                        in
-                        viewResource count False Noop res
+                        viewResource count useColouredBackground (ResourceClicked res) res
                     )
 
         numResources =
-            List.length clickableResources + List.length viewableResources
+            List.length unlockedResources
 
         numColumns =
             min numResources 4
@@ -465,7 +459,7 @@ viewResources model =
         , A.style "width" "100%"
         , A.style "gap" "5px"
         ]
-        (List.append clickableResources viewableResources)
+        htmlResources
 
 
 viewResource : Int -> Bool -> Msg -> Resource -> Html Msg

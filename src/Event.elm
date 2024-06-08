@@ -4,12 +4,11 @@ import Dict exposing (Dict)
 import Resource exposing (Resource)
 
 type Event
-    = MakeResourceViewable Resource
-    | MakeResourceClickable Resource
+    = UnlockResource Resource
     | StartQuest Quest
     | StartGeneratingDeals
     | AddDeal Int Deal
-
+    | SetClickValueForResource String Int
 
 type alias ResourceTrigger =
     { resourcesNeeded : List ( Resource, Int )
@@ -45,20 +44,12 @@ type alias Quest =
     }
 
 
-unlockWood : Quest
-unlockWood =
-    { cost = [ ( Resource.coin, 30 ), ( Resource.wood, 10 ) ]
-    , title = "Work gloves"
-    , description = "This is your first upgrade. Lets you click for wood"
-    , events = [ MakeResourceClickable Resource.wood ]
-    }
-
-
 type alias Deal =
     { sell : (Resource, Int)
     , buy : (Resource, Int)
     , events : List Event
     }
+
 
 dealValue : Deal -> Int
 dealValue deal =
