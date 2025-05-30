@@ -141,12 +141,6 @@ genDeal { counts } =
 
                             else
                                 let
-                                    hi =
-                                        Debug.log "sell index" sellIndex
-
-                                    hi2 =
-                                        Debug.log "buy index" buyIndex
-
                                     sellResource =
                                         Resource.resourceArray
                                             |> Array.get sellIndex
