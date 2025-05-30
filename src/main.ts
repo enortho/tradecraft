@@ -11,9 +11,6 @@ var subscription: number | null = null;
 const getRndInteger = (min: number, max: number)  =>
     Math.floor(Math.random() * (max - min) ) + min;
 
-const wait = (ms: number)  =>
-    Promise.resolve(r=>setTimeout(r,ms))
-
 function randomInterval(fn: () => void) {
     subscription = setTimeout(() => {
         fn();
