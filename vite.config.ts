@@ -3,6 +3,6 @@ import { defineConfig } from "vite";
 import elm from "vite-plugin-elm";
 
 export default defineConfig({
-  plugins: [elm({ optimize: undefined })],
+  plugins: [elm()],
   base: 'https://enortho.github.io/tradecraft/'
 });
