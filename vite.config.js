@@ -3,5 +3,5 @@ import elmPlugin from 'vite-plugin-elm';
 
 export default defineConfig({
   plugins: [elmPlugin()],
-  base: '/tictactoe-elm'
+  base: '/tradecraft'
 });
